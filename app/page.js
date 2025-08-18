@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 
@@ -9,143 +9,99 @@ export default function Home() {
   const [gameCode, setGameCode] = useState('');
   const [name, setName] = useState('');
   const [selectedGame, setSelectedGame] = useState('tic-tac-toe');
+  const [isCreating, setIsCreating] = useState(false); // Track if we just created a game
   const router = useRouter();
 
-  // Test Supabase connection on mount
-  useEffect(() => {
-    const testSupabase = async () => {
-      try {
-        const { data, error } = await supabase.from('games').select('id').limit(1);
-        console.log('Supabase connection test:', { data, error });
-      } catch (err) {
-        console.error('Supabase connection error:', err);
-        alert('Failed to connect to Supabase. Check console for details.');
-      }
-    };
-    testSupabase();
-  }, []);
-
   const createGame = async () => {
-    if (!name.trim()) {
-      alert('Please enter your name');
-      return;
-    }
-    if (!selectedGame) {
-      alert('Please select a game type');
-      return;
-    }
+    if (!name.trim() || !selectedGame) return;
     try {
-      console.log('Creating game with:', { player1: name, game_type: selectedGame });
-      localStorage.setItem('playerName', name);
+      const initialBoard = selectedGame === 'trivia' 
+        ? { questionIndex: 0, player1Score: 0, player2Score: 0 } 
+        : ['', '', '', '', '', '', '', '', ''];
+      const initialTurn = selectedGame === 'trivia' ? 'player1' : 'X';
       const { data, error } = await supabase
         .from('games')
         .insert({
           player1: name,
           game_type: selectedGame,
-          board: selectedGame === 'trivia' ? { questionIndex: 0, player1Score: 0, player2Score: 0 } : ['','','','','','','','','']
+          board: initialBoard,
+          turn: initialTurn
         })
         .select();
-      if (error) {
-        console.error('Supabase create game error:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint
-        });
-        alert(`Failed to create game: ${error.message || 'Unknown error. Check console.'}`);
-        return;
-      }
-      if (!data || !data[0]) {
-        console.error('No data returned from Supabase');
-        alert('Failed to create game: No data returned');
-        return;
-      }
-      console.log('Game created:', data[0]);
-      setGameCode(data[0].id);
-      router.push(`/game/${data[0].id}`);
+      if (error) throw error;
+      const gameId = data[0].id;
+      setGameCode(gameId);
+      setIsCreating(true); // Show waiting UI after creation
+      router.push(`/game/${gameId}`); // Redirect to game page
     } catch (err) {
-      console.error('Unexpected error in createGame:', {
-        message: err.message,
-        stack: err.stack
-      });
-      alert('Unexpected error creating game. Check console for details.');
+      alert('Failed to create game. Check console.');
     }
   };
 
   const joinGame = async () => {
-    if (!name.trim() || !gameCode.trim()) {
-      alert('Please enter your name and a valid game code');
-      return;
-    }
+    if (!name.trim() || !gameCode.trim()) return;
     try {
-      console.log('Joining game with code:', gameCode);
       const { data, error } = await supabase.from('games').select().eq('id', gameCode.trim());
-      if (error) {
-        console.error('Supabase join game error:', error);
-        alert(`Error joining game: ${error.message || 'Unknown error'}`);
-        return;
-      }
-      if (data && data.length > 0 && !data[0].player2) {
+      if (error) throw error;
+      if (data[0] && !data[0].player2) {
         localStorage.setItem('playerName', name);
         await supabase.from('games').update({ player2: name }).eq('id', gameCode.trim());
-        console.log('Joined game:', data[0]);
         router.push(`/game/${gameCode}`);
       } else {
-        console.error('Invalid or full game:', { data });
-        alert('Invalid game code or game is already full');
+        alert('Invalid or full game');
       }
     } catch (err) {
-      console.error('Unexpected error in joinGame:', err);
-      alert('Unexpected error joining game. Check console for details.');
+      alert('Failed to join game. Check console.');
     }
   };
 
   return (
-    <div className="min-h-screen text-blackflex items-center justify-center bg-gray-100">
-      <div className="p-6 bg-white rounded shadow-md">
-        <h1 className="text-2xl font-bold mb-4">Tic-Tac-Toe & Trivia</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-100 to-rose-100">
+      <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-2xl border border-pink-200">
+        <h1 className="text-3xl font-bold text-center mb-6 text-rose-600">Love Games Hub</h1>
         <input
           type="text"
-          placeholder="Your name"
+          placeholder="Your nickname"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="border p-2 mb-4 w-full"
+          className="w-full p-3 mb-4 border border-pink-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-shadow"
         />
         <select
           value={selectedGame}
           onChange={(e) => setSelectedGame(e.target.value)}
-          className="border p-2 mb-4 w-full"
+          className="w-full p-3 mb-4 border border-pink-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-shadow"
         >
           <option value="tic-tac-toe">Tic-Tac-Toe</option>
           <option value="trivia">Trivia</option>
         </select>
         <button
           onClick={createGame}
-          className="bg-blue-500 text-white p-2 rounded mb-2 w-full"
+          className="w-full p-3 mb-4 bg-pink-500 text-white rounded-lg hover:bg-pink-600 focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all shadow-md"
           disabled={!name.trim() || !selectedGame}
         >
           Create Game
         </button>
         <input
           type="text"
-          placeholder="Enter game code"
+          placeholder="Paste game code here"
           value={gameCode}
           onChange={(e) => setGameCode(e.target.value)}
-          className="border p-2 mb-4 w-full"
+          className="w-full p-3 mb-4 border border-pink-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-shadow"
         />
         <button
           onClick={joinGame}
-          className="bg-green-500 text-white p-2 rounded w-full"
+          className="w-full p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 transition-all shadow-md"
           disabled={!name.trim() || !gameCode.trim()}
         >
           Join Game
         </button>
         {gameCode && (
-          <div className="mt-4">
-            <p>Share this code: {gameCode}</p>
+          <div className="mt-4 text-center p-4 bg-pink-50 rounded-lg border border-pink-200">
+            <p className="text-pink-700 mb-2">Share this code with your love:</p>
+            <span className="font-mono text-rose-600">{gameCode}</span>
             <button
               onClick={() => navigator.clipboard.writeText(gameCode)}
-              className="bg-gray-500 text-white p-2 rounded mt-2"
+              className="block mx-auto mt-2 p-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all shadow"
             >
               Copy Code
             </button>

@@ -1,148 +1,127 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { useParams, useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import TicTacToe from '@/app/components/tictactoe';
+import Trivia from '@/app/components/trivia';
+import WaitingScreen from '@/app/components/waiting';
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-export default function Home() {
-  const [gameCode, setGameCode] = useState('');
-  const [name, setName] = useState('');
-  const [selectedGame, setSelectedGame] = useState('tic-tac-toe');
+export default function Game() {
+  const { id } = useParams();
+  const router = useRouter();
+  const [gameType, setGameType] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [message, setMessage] = useState('');
+  const [player2Joined, setPlayer2Joined] = useState(false);
+  const [musicPlaying, setMusicPlaying] = useState(true);
+  const [audio, setAudio] = useState(null);
 
   useEffect(() => {
-    const testSupabase = async () => {
-      try {
-        const { data, error } = await supabase.from('games').select('id').limit(1);
-        console.log('Supabase test query:', { data, error });
-      } catch (err) {
-        console.error('Supabase connection error:', err);
+    const gameAudio = new Audio('/sounds/romantic-bg.mp3');
+    gameAudio.loop = true;
+    gameAudio.volume = 0.3;
+    gameAudio.play();
+    setAudio(gameAudio);
+
+    const fetchGame = async () => {
+      const { data } = await supabase.from('games').select('*').eq('id', id).single();
+      if (data) {
+        setGameType(data.game_type);
+        setPlayer2Joined(!!data.player2);
+      } else {
+        router.push('/');
       }
     };
-    testSupabase();
-  }, []);
+    fetchGame();
 
-  const createGame = async () => {
-    if (!name.trim()) {
-      alert('Please enter your name');
-      return;
-    }
-    if (!selectedGame) {
-      alert('Please select a game type');
-      return;
-    }
-    try {
-      console.log('Attempting to create game with:', { player1: name, game_type: selectedGame });
-      localStorage.setItem('playerName', name);
-      const { data, error } = await supabase
-        .from('games')
-        .insert({ player1: name, game_type: selectedGame })
-        .select();
-      if (error) {
-        console.error('Supabase error:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint
-        });
-        alert(`Failed to create game: ${error.message || 'Unknown error'}`);
-        return;
-      }
-      if (!data || !data[0]) {
-        console.error('No data returned from Supabase insert');
-        alert('Failed to create game: No data returned');
-        return;
-      }
-      console.log('Game created successfully:', data[0]);
-      setGameCode(data[0].id);
-      window.location.href = `/game/${data[0].id}`;
-    } catch (err) {
-      console.error('Unexpected error in createGame:', {
-        message: err.message,
-        stack: err.stack
-      });
-      alert('Something went wrong. Please check the console and try again.');
-    }
+    const gameSubscription = supabase.channel(`game:${id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${id}` }, (payload) => {
+        if (payload.new.player2) setPlayer2Joined(true);
+      })
+      .subscribe();
+
+    const messageSubscription = supabase.channel(`messages:${id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `game_id=eq.${id}` }, (payload) => {
+        setMessages((prev) => [...prev, payload.new]);
+      })
+      .subscribe();
+
+    const fetchMessages = async () => {
+      const { data } = await supabase.from('messages').select().eq('game_id', id).order('created_at');
+      setMessages(data || []);
+    };
+    fetchMessages();
+
+    return () => {
+      gameAudio.pause();
+      supabase.removeChannel(gameSubscription);
+      supabase.removeChannel(messageSubscription);
+    };
+  }, [id, router]);
+
+  const toggleMusic = () => {
+    setMusicPlaying(!musicPlaying);
+    if (musicPlaying) audio.pause();
+    else audio.play();
   };
 
-  const joinGame = async () => {
-    if (!name.trim() || !gameCode.trim()) {
-      alert('Please enter your name and a valid game code');
-      return;
-    }
-    try {
-      const { data, error } = await supabase.from('games').select().eq('id', gameCode.trim());
-      if (error) {
-        console.error('Error fetching game:', error);
-        alert('Error joining game. Please try again.');
-        return;
-      }
-      if (data && data.length > 0 && !data[0].player2) {
-        localStorage.setItem('playerName', name);
-        await supabase.from('games').update({ player2: name }).eq('id', gameCode.trim());
-        window.location.href = `/game/${gameCode}`;
-      } else {
-        alert('Invalid game code or game is already full');
-      }
-    } catch (err) {
-      console.error('Unexpected error:', err);
-      alert('Something went wrong. Please check the game code and try again.');
+  const sendMessage = async () => {
+    if (!message.trim()) return;
+    await supabase.from('messages').insert({ game_id: id, sender: localStorage.getItem('playerName'), content: message });
+    setMessage('');
+  };
+
+  if (!player2Joined) {
+    return <WaitingScreen gameId={id} />;
+  }
+
+  const renderGame = () => {
+    switch (gameType) {
+      case 'tic-tac-toe':
+        return <TicTacToe gameId={id} />;
+      case 'trivia':
+        return <Trivia gameId={id} />;
+      default:
+        return <p>Invalid game type</p>;
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="p-6 bg-white rounded shadow-md">
-        <h1 className="text-2xl font-bold mb-4">Tic-Tac-Toe & More</h1>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="min-h-screen flex flex-col md:flex-row items-center justify-center bg-gradient-to-br from-pink-100 to-rose-100 p-4"
+    >
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} transition={{ duration: 0.3 }} className="card mb-4 md:mb-0 md:mr-6">
+        {renderGame()}
+      </motion.div>
+      <motion.div initial={{ x: 50 }} animate={{ x: 0 }} transition={{ duration: 0.5 }} className="card w-full md:w-96">
+        <h2 className="text-2xl font-bold mb-4 text-rose-600">Chat</h2>
+        <div className="h-64 overflow-y-auto mb-4 border border-pink-300 p-4 rounded-lg bg-pink-50">
+          {messages.map((msg) => (
+            <motion.p initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} key={msg.id} className="mb-2">
+              <strong className="text-pink-700">{msg.sender}: </strong>{msg.content}
+            </motion.p>
+          ))}
+        </div>
         <input
           type="text"
-          placeholder="Your name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="border p-2 mb-4 w-full"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          className="w-full p-3 mb-4 border border-pink-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-shadow"
+          placeholder="Send a sweet message..."
         />
-        <select
-          value={selectedGame}
-          onChange={(e) => setSelectedGame(e.target.value)}
-          className="border p-2 mb-4 w-full"
-        >
-          <option value="tic-tac-toe">Tic-Tac-Toe</option>
-          {/* Add more games as you implement them */}
-          <option value="connect-four">Connect Four</option>
-          <option value="trivia">Trivia</option>
-        </select>
-        <button
-          onClick={createGame}
-          className="bg-blue-500 text-white p-2 rounded mb-2 w-full"
-          disabled={!name.trim() || !selectedGame}
-        >
-          Create Game
+        <button onClick={sendMessage} className="w-full p-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-all shadow-md">
+          Send
         </button>
-        <input
-          type="text"
-          placeholder="Enter game code"
-          value={gameCode}
-          onChange={(e) => setGameCode(e.target.value)}
-          className="border p-2 mb-4 w-full"
-        />
-        <button
-          onClick={joinGame}
-          className="bg-green-500 text-white p-2 rounded w-full"
-          disabled={!name.trim() || !gameCode.trim()}
-        >
-          Join Game
+        <button onClick={toggleMusic} className="w-full p-3 mt-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all shadow-md">
+          {musicPlaying ? 'Pause Music' : 'Play Music'}
         </button>
-        {gameCode && (
-          <div className="mt-4">
-            <p>Share this code: {gameCode}</p>
-            <button
-              onClick={() => navigator.clipboard.writeText(gameCode)}
-              className="bg-gray-500 text-white p-2 rounded mt-2"
-            >
-              Copy Code
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
