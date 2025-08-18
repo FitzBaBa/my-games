@@ -1,87 +1,147 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { useParams } from 'next/navigation';
-import TicTacToe from '@/components/TicTacToe';
-import ConnectFour from '@/components/ConnectFour';
-import Trivia from '@/components/Trivia';
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-export default function Game() {
-  const { id } = useParams();
-  const [gameType, setGameType] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [message, setMessage] = useState('');
+export default function Home() {
+  const [gameCode, setGameCode] = useState('');
+  const [name, setName] = useState('');
+  const [selectedGame, setSelectedGame] = useState('tic-tac-toe');
 
   useEffect(() => {
-    // Fetch game type
-    const fetchGame = async () => {
-      const { data } = await supabase.from('games').select('game_type').eq('id', id).single();
-      setGameType(data.game_type);
+    const testSupabase = async () => {
+      try {
+        const { data, error } = await supabase.from('games').select('id').limit(1);
+        console.log('Supabase test query:', { data, error });
+      } catch (err) {
+        console.error('Supabase connection error:', err);
+      }
     };
-    fetchGame();
+    testSupabase();
+  }, []);
 
-    // Subscribe to chat messages (same as before)
-    const messageSubscription = supabase
-      .channel(`messages:${id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `game_id=eq.${id}` }, (payload) => {
-        setMessages((prev) => [...prev, payload.new]);
-      })
-      .subscribe();
-
-    const fetchMessages = async () => {
-      const { data } = await supabase.from('messages').select().eq('game_id', id).order('created_at');
-      setMessages(data);
-    };
-    fetchMessages();
-
-    return () => supabase.removeChannel(messageSubscription);
-  }, [id]);
-
-  const sendMessage = async () => {
-    if (!message.trim()) return;
-    await supabase.from('messages').insert({ game_id: id, sender: localStorage.getItem('playerName'), content: message });
-    setMessage('');
+  const createGame = async () => {
+    if (!name.trim()) {
+      alert('Please enter your name');
+      return;
+    }
+    if (!selectedGame) {
+      alert('Please select a game type');
+      return;
+    }
+    try {
+      console.log('Attempting to create game with:', { player1: name, game_type: selectedGame });
+      localStorage.setItem('playerName', name);
+      const { data, error } = await supabase
+        .from('games')
+        .insert({ player1: name, game_type: selectedGame })
+        .select();
+      if (error) {
+        console.error('Supabase error:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        alert(`Failed to create game: ${error.message || 'Unknown error'}`);
+        return;
+      }
+      if (!data || !data[0]) {
+        console.error('No data returned from Supabase insert');
+        alert('Failed to create game: No data returned');
+        return;
+      }
+      console.log('Game created successfully:', data[0]);
+      setGameCode(data[0].id);
+      window.location.href = `/game/${data[0].id}`;
+    } catch (err) {
+      console.error('Unexpected error in createGame:', {
+        message: err.message,
+        stack: err.stack
+      });
+      alert('Something went wrong. Please check the console and try again.');
+    }
   };
 
-  const renderGame = () => {
-    switch (gameType) {
-      case 'tic-tac-toe':
-        return <TicTacToe gameId={id} />;
-      case 'connect-four':
-        return <ConnectFour gameId={id} />;
-      case 'trivia':
-        return <Trivia gameId={id} />;
-      default:
-        return <p>Loading game...</p>;
+  const joinGame = async () => {
+    if (!name.trim() || !gameCode.trim()) {
+      alert('Please enter your name and a valid game code');
+      return;
+    }
+    try {
+      const { data, error } = await supabase.from('games').select().eq('id', gameCode.trim());
+      if (error) {
+        console.error('Error fetching game:', error);
+        alert('Error joining game. Please try again.');
+        return;
+      }
+      if (data && data.length > 0 && !data[0].player2) {
+        localStorage.setItem('playerName', name);
+        await supabase.from('games').update({ player2: name }).eq('id', gameCode.trim());
+        window.location.href = `/game/${gameCode}`;
+      } else {
+        alert('Invalid game code or game is already full');
+      }
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      alert('Something went wrong. Please check the game code and try again.');
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row items-center justify-center bg-gray-100 p-4">
-      <div className="bg-white p-6 rounded shadow-md mb-4 md:mb-0 md:mr-4">
-        {renderGame()}
-      </div>
-      <div className="bg-white p-6 rounded shadow-md w-full md:w-80">
-        <h2 className="text-xl font-bold mb-4">Chat</h2>
-        <div className="h-64 overflow-y-auto mb-4 border p-2">
-          {messages.map((msg) => (
-            <p key={msg.id} className="mb-2">
-              <strong>{msg.sender}: </strong>{msg.content}
-            </p>
-          ))}
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="p-6 bg-white rounded shadow-md">
+        <h1 className="text-2xl font-bold mb-4">Tic-Tac-Toe & More</h1>
         <input
           type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          className="border p-2 w-full mb-2"
-          placeholder="Type a message..."
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="border p-2 mb-4 w-full"
         />
-        <button onClick={sendMessage} className="bg-blue-500 text-white p-2 rounded w-full">
-          Send
+        <select
+          value={selectedGame}
+          onChange={(e) => setSelectedGame(e.target.value)}
+          className="border p-2 mb-4 w-full"
+        >
+          <option value="tic-tac-toe">Tic-Tac-Toe</option>
+          {/* Add more games as you implement them */}
+          <option value="connect-four">Connect Four</option>
+          <option value="trivia">Trivia</option>
+        </select>
+        <button
+          onClick={createGame}
+          className="bg-blue-500 text-white p-2 rounded mb-2 w-full"
+          disabled={!name.trim() || !selectedGame}
+        >
+          Create Game
         </button>
+        <input
+          type="text"
+          placeholder="Enter game code"
+          value={gameCode}
+          onChange={(e) => setGameCode(e.target.value)}
+          className="border p-2 mb-4 w-full"
+        />
+        <button
+          onClick={joinGame}
+          className="bg-green-500 text-white p-2 rounded w-full"
+          disabled={!name.trim() || !gameCode.trim()}
+        >
+          Join Game
+        </button>
+        {gameCode && (
+          <div className="mt-4">
+            <p>Share this code: {gameCode}</p>
+            <button
+              onClick={() => navigator.clipboard.writeText(gameCode)}
+              className="bg-gray-500 text-white p-2 rounded mt-2"
+            >
+              Copy Code
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
