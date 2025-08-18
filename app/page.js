@@ -59,7 +59,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen text-black flex items-center justify-center bg-gray-100">
       <div className="p-6 bg-white rounded shadow-md">
         <h1 className="text-2xl font-bold mb-4">Tic-Tac-Toe & More</h1>
         <input
