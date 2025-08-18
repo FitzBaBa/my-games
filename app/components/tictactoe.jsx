@@ -61,7 +61,7 @@ export default function TicTacToe({ gameId }) {
   };
 
   return (
-    <div className="bg-white p-6 rounded shadow-md">
+    <div className="bg-white text-black p-6 rounded shadow-md">
       <h2 className="text-xl font-bold mb-4">Tic-Tac-Toe</h2>
       <div className="grid grid-cols-3 gap-2 w-64">
         {board.map((cell, index) => (
