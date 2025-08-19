@@ -14,18 +14,12 @@ const logToStorage = (message, data) => {
   console.log(message, data);
 };
 
-// UUID validation
-const isValidUUID = (str) => {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(str);
-};
-
 export default function Home() {
   const [gameCode, setGameCode] = useState('');
   const [name, setName] = useState('');
   const [selectedGame, setSelectedGame] = useState('tic-tac-toe');
   const [isCreating, setIsCreating] = useState(false);
-  const [isJoining, setIsJoining] = useState(false); // Track joining state
+  const [isJoining, setIsJoining] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -97,35 +91,41 @@ export default function Home() {
   };
 
   const joinGame = async () => {
+    logToStorage('joinGame function called', { name, gameCode }); // Log entry
     if (!name.trim()) {
+      logToStorage('Missing name', { name });
       alert('Abeg, put your name!');
       return;
     }
     if (!gameCode.trim()) {
+      logToStorage('Missing game code', { gameCode });
       alert('Paste game code na!');
-      return;
-    }
-    if (!isValidUUID(gameCode.trim())) {
-      logToStorage('Invalid game code format', { gameCode });
-      alert('Game code no correct! E suppose be like UUID (e.g., xxxx-xxxx-xxxx-xxxx).');
-      setGameCode('');
       return;
     }
     setIsJoining(true);
     try {
-      logToStorage('Trying to join game', { gameCode, name });
+      logToStorage('Querying Supabase for game', { gameCode: gameCode.trim() });
       const { data, error } = await supabase
         .from('games')
         .select('id, player1, player2, game_type')
         .eq('id', gameCode.trim())
         .single();
-      logToStorage('Join query', { data, error });
-      if (error || !data) {
-        logToStorage('Supabase join error or no game', {
-          error: error ? { message: error.message, code: error.code } : null,
-          data
+      logToStorage('Supabase query result', { data, error });
+      if (error) {
+        logToStorage('Supabase query error', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
         });
-        alert(error?.message ? `No join game: ${error.message}` : 'Game no dey exist! Check code.');
+        alert(`No join game: ${error.message || 'Check console!'}`);
+        setGameCode('');
+        setIsJoining(false);
+        return;
+      }
+      if (!data) {
+        logToStorage('No game found', { gameCode });
+        alert('Game code no correct! E no dey exist.');
         setGameCode('');
         setIsJoining(false);
         return;
@@ -144,44 +144,25 @@ export default function Home() {
         setIsJoining(false);
         return;
       }
-      localStorage.setItem('playerName', name.trim());
-      // Retry update up to 2 times for transient errors
-      let updateError = null;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const { error } = await supabase
-            .from('games')
-            .update({ player2: name.trim() })
-            .eq('id', gameCode.trim());
-          if (!error) {
-            updateError = null;
-            break;
-          }
-          updateError = error;
-          logToStorage(`Update player2 attempt ${attempt} failed`, {
-            message: error.message,
-            code: error.code
-          });
-          await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
-        } catch (err) {
-          updateError = err;
-          logToStorage(`Update player2 attempt ${attempt} error`, {
-            message: err.message,
-            code: err.code
-          });
-        }
-      }
+      logToStorage('Updating player2', { gameId: gameCode, player2: name });
+      const { error: updateError } = await supabase
+        .from('games')
+        .update({ player2: name.trim() })
+        .eq('id', gameCode.trim());
       if (updateError) {
-        logToStorage('Error updating player2', {
+        logToStorage('Supabase update error', {
           message: updateError.message,
-          code: updateError.code
+          code: updateError.code,
+          details: updateError.details,
+          hint: updateError.hint
         });
-        alert('No join game. Something spoil! Check console.');
+        alert(`No join game: ${updateError.message || 'Something spoil! Check console.'}`);
         setGameCode('');
         setIsJoining(false);
         return;
       }
-      logToStorage('Joined game', { id: gameCode });
+      logToStorage('Successfully joined game', { id: gameCode, player2: name });
+      localStorage.setItem('playerName', name.trim());
       router.push(`/game/${gameCode}`);
       setTimeout(() => {
         if (window.location.pathname !== `/game/${gameCode}`) {
@@ -190,11 +171,14 @@ export default function Home() {
         }
       }, 1000);
     } catch (err) {
-      logToStorage('Unexpected error in joinGame', { message: err.message, stack: err.stack });
-      alert('Something spoil for join game. Check console or localStorage!');
+      logToStorage('Unexpected error in joinGame', {
+        message: err.message,
+        stack: err.stack,
+        gameCode,
+        name
+      });
+      alert('Something spoil for join game! Check console or localStorage.');
       setGameCode('');
-      setIsJoining(false);
-    } finally {
       setIsJoining(false);
     }
   };
@@ -222,6 +206,7 @@ export default function Home() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full p-3 mb-4 border border-pink-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400 transition-shadow"
+          disabled={isJoining}
         />
         <motion.select
           initial={{ x: 20 }}
@@ -229,6 +214,7 @@ export default function Home() {
           value={selectedGame}
           onChange={(e) => setSelectedGame(e.target.value)}
           className="w-full p-3 mb-4 border border-pink-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400 transition-shadow"
+          disabled={isJoining}
         >
           <option value="tic-tac-toe">Tic-Tac-Toe</option>
           <option value="trivia">Trivia</option>
@@ -261,7 +247,10 @@ export default function Home() {
               animate={{ scale: 1 }}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={joinGame}
+              onClick={() => {
+                logToStorage('Join button clicked', { name, gameCode });
+                joinGame();
+              }}
               className="w-full p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 transition-all shadow-md"
               disabled={!name.trim() || !gameCode.trim() || isJoining}
             >
